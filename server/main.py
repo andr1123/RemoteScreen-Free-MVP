@@ -6,6 +6,8 @@ import logging
 app = FastAPI(title="RemoteScreen Free MVP")
 viewers = set()
 phones = set()
+text_clients = set()
+latest_text = ""
 HTML = Path(__file__).with_name("index.html").read_text(encoding="utf-8")
 
 logging.basicConfig(level=logging.INFO)
@@ -17,7 +19,39 @@ async def index():
 
 @app.get("/health")
 async def health():
-    return {"ok": True, "phones": len(phones), "viewers": len(viewers)}
+    return {"ok": True, "phones": len(phones), "viewers": len(viewers), "text_clients": len(text_clients)}
+
+@app.websocket("/ws/text")
+async def text_phone(ws: WebSocket):
+    global latest_text
+    await ws.accept()
+    text_clients.add(ws)
+    log.info("TEXT PHONE CONNECTED: %s | clients=%d", ws.client, len(text_clients))
+    try:
+        await ws.send_text(latest_text)
+        while True:
+            text = await ws.receive_text()
+            latest_text = text
+            log.info("TEXT RECEIVED: %r", text)
+            for viewer in list(text_clients):
+                if viewer is ws:
+                    continue
+                try:
+                    await viewer.send_text(text)
+                except Exception:
+                    text_clients.discard(viewer)
+            for viewer in list(viewers):
+                try:
+                    await viewer.send_text("TEXT:" + text)
+                except Exception:
+                    viewers.discard(viewer)
+    except WebSocketDisconnect:
+        pass
+    except Exception as exc:
+        log.exception("TEXT PHONE ERROR: %s", exc)
+    finally:
+        text_clients.discard(ws)
+        log.info("TEXT PHONE DISCONNECTED: %s | clients=%d", ws.client, len(text_clients))
 
 @app.websocket("/ws/phone")
 async def phone(ws: WebSocket):
@@ -31,8 +65,7 @@ async def phone(ws: WebSocket):
             for viewer in list(viewers):
                 try:
                     await viewer.send_bytes(data)
-                except Exception as exc:
-                    log.warning("Viewer send failed: %s", exc)
+                except Exception:
                     viewers.discard(viewer)
     except WebSocketDisconnect:
         log.info("PHONE DISCONNECTED: %s", ws.client)
