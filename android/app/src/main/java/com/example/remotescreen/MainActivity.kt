@@ -25,8 +25,19 @@ class MainActivity : AppCompatActivity() {
         start = findViewById(R.id.start)
         stop = findViewById(R.id.stop)
 
+        if (url.text.isNullOrBlank()) {
+            url.setText("ws://10.188.45.140:8000/ws/phone")
+        }
+
         start.setOnClickListener {
+            val wsUrl = url.text.toString().trim()
+            if (!wsUrl.startsWith("ws://") && !wsUrl.startsWith("wss://")) {
+                status.text = "Status: URL harus ws:// atau wss://"
+                return@setOnClickListener
+            }
+
             val mgr = getSystemService(MediaProjectionManager::class.java)
+            status.text = "Status: meminta izin screen capture..."
             startActivityForResult(mgr.createScreenCaptureIntent(), requestCode)
         }
 
@@ -42,6 +53,8 @@ class MainActivity : AppCompatActivity() {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode != this.requestCode || resultCode != Activity.RESULT_OK || data == null) {
             status.text = "Status: izin screen capture ditolak"
+            start.isEnabled = true
+            stop.isEnabled = false
             return
         }
 
@@ -51,7 +64,7 @@ class MainActivity : AppCompatActivity() {
             putExtra("wsUrl", url.text.toString().trim())
         }
         startForegroundService(intent)
-        status.text = "Status: sharing dimulai"
+        status.text = "Status: menghubungkan ke server..."
         start.isEnabled = false
         stop.isEnabled = true
     }
