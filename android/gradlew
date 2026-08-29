@@ -1,0 +1,10 @@
+#!/bin/sh
+set -e
+V=8.9
+D="$HOME/.gradle/wrapper/dists/gradle-$V-bin"
+if [ ! -x "$D/gradle-$V/bin/gradle" ]; then
+  mkdir -p "$D"
+  curl -L --fail -o "$D/gradle.zip" "https://services.gradle.org/distributions/gradle-$V-bin.zip"
+  unzip -q -o "$D/gradle.zip" -d "$D"
+fi
+exec "$D/gradle-$V/bin/gradle" "$@"
