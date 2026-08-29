@@ -1,71 +1,64 @@
 package com.example.remotescreen
 
-import android.app.Activity
-import android.content.Intent
-import android.media.projection.MediaProjectionManager
 import android.os.Bundle
-import android.widget.Button
 import android.widget.EditText
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.WebSocket
+import okhttp3.WebSocketListener
+import java.util.concurrent.TimeUnit
 
 class MainActivity : AppCompatActivity() {
-    private lateinit var url: EditText
+    private val serverUrl = "ws://10.188.45.140:8000/ws/text"
+    private val client = OkHttpClient.Builder()
+        .pingInterval(20, TimeUnit.SECONDS)
+        .build()
+    private var socket: WebSocket? = null
+    private lateinit var input: EditText
     private lateinit var status: TextView
-    private lateinit var start: Button
-    private lateinit var stop: Button
-    private val requestCode = 1001
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        url = findViewById(R.id.url)
+        input = findViewById(R.id.input)
         status = findViewById(R.id.status)
-        start = findViewById(R.id.start)
-        stop = findViewById(R.id.stop)
 
-        if (url.text.isNullOrBlank()) {
-            url.setText("ws://10.188.45.140:8000/ws/phone")
-        }
+        connect()
 
-        start.setOnClickListener {
-            val wsUrl = url.text.toString().trim()
-            if (!wsUrl.startsWith("ws://") && !wsUrl.startsWith("wss://")) {
-                status.text = "Status: URL harus ws:// atau wss://"
-                return@setOnClickListener
+        input.addTextChangedListener(object : android.text.TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                socket?.send(s?.toString() ?: "")
             }
-
-            val mgr = getSystemService(MediaProjectionManager::class.java)
-            status.text = "Status: meminta izin screen capture..."
-            startActivityForResult(mgr.createScreenCaptureIntent(), requestCode)
-        }
-
-        stop.setOnClickListener {
-            stopService(Intent(this, ScreenService::class.java))
-            status.text = "Status: berhenti"
-            start.isEnabled = true
-            stop.isEnabled = false
-        }
+            override fun afterTextChanged(s: android.text.Editable?) = Unit
+        })
     }
 
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode != this.requestCode || resultCode != Activity.RESULT_OK || data == null) {
-            status.text = "Status: izin screen capture ditolak"
-            start.isEnabled = true
-            stop.isEnabled = false
-            return
-        }
+    private fun connect() {
+        status.text = "Status: menghubungkan..."
+        val request = Request.Builder().url(serverUrl).build()
+        socket = client.newWebSocket(request, object : WebSocketListener() {
+            override fun onOpen(webSocket: WebSocket, response: okhttp3.Response) {
+                runOnUiThread { status.text = "Status: TERHUBUNG" }
+                webSocket.send(input.text.toString())
+            }
 
-        val intent = Intent(this, ScreenService::class.java).apply {
-            putExtra("resultCode", resultCode)
-            putExtra("resultData", data)
-            putExtra("wsUrl", url.text.toString().trim())
-        }
-        startForegroundService(intent)
-        status.text = "Status: menghubungkan ke server..."
-        start.isEnabled = false
-        stop.isEnabled = true
+            override fun onFailure(webSocket: WebSocket, t: Throwable, response: okhttp3.Response?) {
+                runOnUiThread { status.text = "Status: GAGAL — ${t.message ?: "koneksi gagal"}" }
+            }
+
+            override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                runOnUiThread { status.text = "Status: terputus" }
+            }
+        })
+    }
+
+    override fun onDestroy() {
+        socket?.close(1000, "app closed")
+        client.dispatcher.executorService.shutdown()
+        super.onDestroy()
     }
 }
